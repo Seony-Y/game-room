@@ -1,0 +1,450 @@
+const crypto = require('crypto');
+const http = require('http');
+const express = require('express');
+const cors = require('cors');
+const { Server } = require('socket.io');
+
+const PORT = process.env.PORT || 3001;
+const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
+// 콤마로 구분된 허용 Origin 목록 (예: https://game-room.vercel.app,http://localhost:5173). 비우면 전체 허용
+const CLIENT_ORIGIN = (process.env.CLIENT_ORIGIN || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+const corsOrigin = CLIENT_ORIGIN.length ? CLIENT_ORIGIN : '*';
+
+const app = express();
+app.use(cors({ origin: corsOrigin }));
+app.get('/', (req, res) => res.json({ ok: true, rooms: rooms.size }));
+app.get('/health', (req, res) => res.json({ ok: true }));
+
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: corsOrigin } });
+
+/** @type {Map<string, any>} */
+const rooms = new Map();
+
+const ROLE = { MAFIA: 'mafia', DOCTOR: 'doctor', POLICE: 'police', CITIZEN: 'citizen' };
+
+function makeCode() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code;
+  do {
+    code = Array.from({ length: 5 }, () => chars[crypto.randomInt(chars.length)]).join('');
+  } while (rooms.has(code));
+  return code;
+}
+
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = crypto.randomInt(i + 1);
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function toInt(v, min = 0) {
+  const n = Number.parseInt(v, 10);
+  return Number.isFinite(n) && n >= min ? n : NaN;
+}
+
+function cleanText(v, max = 200) {
+  return String(v ?? '').trim().slice(0, max);
+}
+
+// 설정 검증. 성공 시 { settings }, 실패 시 { error }
+function validateSettings(gameType, capacity, input) {
+  if (!Number.isFinite(capacity) || capacity < 2 || capacity > 50) {
+    return { error: '참가 인원은 2~50명 사이로 입력해주세요.' };
+  }
+  if (gameType === 'mafia') {
+    const mafia = toInt(input.mafia, 1);
+    const doctor = toInt(input.doctor);
+    const police = toInt(input.police);
+    if ([mafia, doctor, police].some(Number.isNaN)) {
+      return { error: '마피아는 1명 이상, 의사/경찰은 0명 이상이어야 합니다.' };
+    }
+    if (mafia + doctor + police > capacity) {
+      return { error: '마피아+의사+경찰 수가 참가 인원보다 많습니다.' };
+    }
+    if (mafia >= capacity - mafia) {
+      return { error: '마피아 수는 나머지 인원보다 적어야 합니다.' };
+    }
+    const missions = Array.isArray(input.missions) ? input.missions.map((m) => cleanText(m)) : [];
+    if (missions.length !== mafia || missions.some((m) => !m)) {
+      return { error: `마피아 미션을 ${mafia}개 모두 입력해주세요.` };
+    }
+    return { settings: { mafia, doctor, police, missions } };
+  }
+  if (gameType === 'image') {
+    const question = cleanText(input.question);
+    if (!question) return { error: '질문을 입력해주세요.' };
+    return { settings: { question } };
+  }
+  return { error: '게임 종류를 선택해주세요.' };
+}
+
+function playerList(room) {
+  return [...room.players.values()].map((p) => ({ id: p.id, name: p.name, connected: p.connected }));
+}
+
+// 득표 순위 (공동 순위: 1,1,3 ...)
+function imageResults(room) {
+  const counts = new Map();
+  for (const p of room.players.values()) counts.set(p.id, 0);
+  for (const target of Object.values(room.image.votes)) {
+    if (counts.has(target)) counts.set(target, counts.get(target) + 1);
+  }
+  const sorted = [...counts.entries()]
+    .map(([id, votes]) => ({ id, name: room.players.get(id).name, votes }))
+    .sort((a, b) => b.votes - a.votes);
+  return sorted.map((r) => ({ ...r, rank: 1 + sorted.filter((o) => o.votes > r.votes).length }));
+}
+
+// 사용자 공개용: 3위까지 (동률 포함, 0표 제외)
+function topRanking(room) {
+  return imageResults(room).filter((r) => r.votes > 0 && r.rank <= 3);
+}
+
+function adminState(room) {
+  return {
+    code: room.code,
+    gameType: room.gameType,
+    capacity: room.capacity,
+    settings: room.settings,
+    status: room.status,
+    players: [...room.players.values()].map((p) => ({
+      id: p.id,
+      name: p.name,
+      connected: p.connected,
+      role: p.role,
+      mission: p.mission,
+      votedFor: room.image?.votes[p.id] ?? null,
+    })),
+    mafiaResult: room.mafiaResult,
+    image: room.image && {
+      round: room.image.round,
+      question: room.image.question,
+      votedCount: Object.keys(room.image.votes).length,
+      revealed: room.image.revealed,
+      results: imageResults(room),
+    },
+  };
+}
+
+function playerState(room, player) {
+  const base = {
+    code: room.code,
+    gameType: room.gameType,
+    capacity: room.capacity,
+    status: room.status,
+    me: { id: player.id, name: player.name },
+    players: playerList(room),
+  };
+  if (room.status === 'lobby') return base;
+
+  if (room.gameType === 'mafia') {
+    base.role = player.role;
+    if (player.role === ROLE.MAFIA) {
+      // 미션은 본인 것만, 팀원은 이름만
+      base.mission = player.mission;
+      base.mafiaTeam = [...room.players.values()]
+        .filter((p) => p.role === ROLE.MAFIA && p.id !== player.id)
+        .map((p) => p.name);
+    }
+    if (room.mafiaResult) {
+      base.result = {
+        winner: room.mafiaResult.winner,
+        reveals: [...room.players.values()]
+          .filter((p) => p.role !== ROLE.CITIZEN)
+          .map((p) => ({ name: p.name, role: p.role })),
+      };
+    }
+  } else {
+    base.image = {
+      round: room.image.round,
+      question: room.image.question,
+      myVote: room.image.votes[player.id] ?? null,
+      votedCount: Object.keys(room.image.votes).length,
+      revealed: room.image.revealed,
+      ranking: room.image.revealed ? topRanking(room) : null,
+    };
+  }
+  return base;
+}
+
+function broadcast(room) {
+  room.updatedAt = Date.now();
+  io.to(`admin:${room.code}`).emit('admin:state', adminState(room));
+  for (const p of room.players.values()) {
+    if (p.socketId) io.to(p.socketId).emit('player:state', playerState(room, p));
+  }
+}
+
+function getAdminRoom(socket, cb) {
+  const room = rooms.get(socket.data.adminCode);
+  if (!room) {
+    cb?.({ ok: false, error: '방 관리 권한이 없습니다.' });
+    return null;
+  }
+  return room;
+}
+
+function startImageRound(room, question) {
+  room.image = {
+    round: (room.image?.round ?? 0) + 1,
+    question,
+    votes: {},
+    revealed: false,
+  };
+}
+
+io.on('connection', (socket) => {
+  // ───────────── ADMIN ─────────────
+  socket.on('admin:create', (input = {}, cb) => {
+    const gameType = input.gameType;
+    const capacity = toInt(input.capacity, 2);
+    const { settings, error } = validateSettings(gameType, capacity, input);
+    if (error) return cb?.({ ok: false, error });
+
+    const code = makeCode();
+    const room = {
+      code,
+      adminToken: crypto.randomBytes(16).toString('hex'),
+      gameType,
+      capacity,
+      settings,
+      status: 'lobby',
+      players: new Map(),
+      image: null,
+      mafiaResult: null,
+      updatedAt: Date.now(),
+    };
+    rooms.set(code, room);
+    socket.data.adminCode = code;
+    socket.join(`admin:${code}`);
+    cb?.({ ok: true, code, adminToken: room.adminToken });
+    broadcast(room);
+  });
+
+  socket.on('admin:join', ({ code, adminToken } = {}, cb) => {
+    const room = rooms.get(String(code || '').toUpperCase());
+    if (!room || room.adminToken !== adminToken) {
+      return cb?.({ ok: false, error: '방이 없거나 관리 권한이 없습니다.' });
+    }
+    socket.data.adminCode = room.code;
+    socket.join(`admin:${room.code}`);
+    cb?.({ ok: true });
+    socket.emit('admin:state', adminState(room));
+  });
+
+  socket.on('admin:update', (input = {}, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    if (room.status !== 'lobby') return cb?.({ ok: false, error: '게임 진행 중에는 설정을 바꿀 수 없습니다.' });
+    const capacity = toInt(input.capacity ?? room.capacity, 2);
+    if (capacity < room.players.size) {
+      return cb?.({ ok: false, error: `이미 ${room.players.size}명이 입장해 있습니다.` });
+    }
+    const { settings, error } = validateSettings(room.gameType, capacity, { ...room.settings, ...input });
+    if (error) return cb?.({ ok: false, error });
+    room.capacity = capacity;
+    room.settings = settings;
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  socket.on('admin:start', (_, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    if (room.status !== 'lobby') return cb?.({ ok: false, error: '이미 시작된 게임입니다.' });
+    const players = [...room.players.values()];
+    if (players.length < 2) return cb?.({ ok: false, error: '최소 2명 이상 입장해야 합니다.' });
+
+    if (room.gameType === 'mafia') {
+      const { mafia, doctor, police, missions } = room.settings;
+      if (players.length !== room.capacity) {
+        return cb?.({ ok: false, error: `참가 인원(${room.capacity}명)이 모두 입장해야 시작할 수 있습니다. (현재 ${players.length}명)` });
+      }
+      const roles = [
+        ...Array(mafia).fill(ROLE.MAFIA),
+        ...Array(doctor).fill(ROLE.DOCTOR),
+        ...Array(police).fill(ROLE.POLICE),
+      ];
+      while (roles.length < players.length) roles.push(ROLE.CITIZEN);
+      const shuffledRoles = shuffle(roles);
+      const shuffledMissions = shuffle(missions);
+      let missionIdx = 0;
+      players.forEach((p, i) => {
+        p.role = shuffledRoles[i];
+        p.mission = p.role === ROLE.MAFIA ? shuffledMissions[missionIdx++] : null;
+      });
+    } else {
+      startImageRound(room, room.settings.question);
+    }
+    room.status = 'playing';
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  // 마피아 결과 공유: 승리팀 + 마피아/경찰/의사 정체 공개
+  socket.on('admin:mafia-result', ({ winner } = {}, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    if (room.gameType !== 'mafia' || room.status !== 'playing') {
+      return cb?.({ ok: false, error: '게임 진행 중에만 결과를 공유할 수 있습니다.' });
+    }
+    if (winner !== ROLE.MAFIA && winner !== ROLE.CITIZEN) {
+      return cb?.({ ok: false, error: '승리팀을 선택해주세요.' });
+    }
+    room.mafiaResult = { winner };
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  // 이미지 결과 공유: 3위까지 공개
+  socket.on('admin:reveal', (_, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    if (room.gameType !== 'image' || !room.image) return cb?.({ ok: false, error: '진행 중인 질문이 없습니다.' });
+    room.image.revealed = true;
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  socket.on('admin:next-question', ({ question } = {}, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    if (room.gameType !== 'image') return cb?.({ ok: false, error: '이미지 게임이 아닙니다.' });
+    const q = cleanText(question);
+    if (!q) return cb?.({ ok: false, error: '질문을 입력해주세요.' });
+    room.settings.question = q;
+    startImageRound(room, q);
+    room.status = 'playing';
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  socket.on('admin:reset', (_, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    room.status = 'lobby';
+    room.image = null;
+    room.mafiaResult = null;
+    for (const p of room.players.values()) {
+      p.role = null;
+      p.mission = null;
+    }
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  socket.on('admin:kick', ({ playerId } = {}, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    const p = room.players.get(playerId);
+    if (!p) return cb?.({ ok: false, error: '없는 참가자입니다.' });
+    if (p.socketId) io.to(p.socketId).emit('player:kicked');
+    room.players.delete(playerId);
+    if (room.image) {
+      delete room.image.votes[playerId];
+      for (const [voter, target] of Object.entries(room.image.votes)) {
+        if (target === playerId) delete room.image.votes[voter];
+      }
+    }
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  socket.on('admin:close', (_, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    for (const p of room.players.values()) {
+      if (p.socketId) io.to(p.socketId).emit('player:closed');
+    }
+    io.to(`admin:${room.code}`).emit('admin:closed');
+    rooms.delete(room.code);
+    cb?.({ ok: true });
+  });
+
+  // ───────────── PLAYER ─────────────
+  socket.on('player:join', ({ code, name, playerId } = {}, cb) => {
+    const room = rooms.get(String(code || '').trim().toUpperCase());
+    if (!room) return cb?.({ ok: false, error: '존재하지 않는 방 코드입니다.' });
+
+    // 재접속 (새로고침 등)
+    const existing = playerId && room.players.get(playerId);
+    if (existing) {
+      existing.socketId = socket.id;
+      existing.connected = true;
+      socket.data.room = room.code;
+      socket.data.playerId = existing.id;
+      cb?.({ ok: true, playerId: existing.id, code: room.code, name: existing.name });
+      return broadcast(room);
+    }
+
+    const nickname = cleanText(name, 20);
+    if (!nickname) return cb?.({ ok: false, error: '닉네임을 입력해주세요.' });
+    if (room.status !== 'lobby') return cb?.({ ok: false, error: '이미 게임이 시작된 방입니다.' });
+    if (room.players.size >= room.capacity) return cb?.({ ok: false, error: '방 인원이 가득 찼습니다.' });
+    if ([...room.players.values()].some((p) => p.name === nickname)) {
+      return cb?.({ ok: false, error: '이미 사용 중인 닉네임입니다.' });
+    }
+
+    const player = {
+      id: crypto.randomUUID(),
+      name: nickname,
+      socketId: socket.id,
+      connected: true,
+      role: null,
+      mission: null,
+    };
+    room.players.set(player.id, player);
+    socket.data.room = room.code;
+    socket.data.playerId = player.id;
+    cb?.({ ok: true, playerId: player.id, code: room.code, name: player.name });
+    broadcast(room);
+  });
+
+  socket.on('player:vote', ({ targetId } = {}, cb) => {
+    const room = rooms.get(socket.data.room);
+    const me = room?.players.get(socket.data.playerId);
+    if (!room || !me || room.gameType !== 'image' || room.status !== 'playing' || !room.image) {
+      return cb?.({ ok: false, error: '지금은 투표할 수 없습니다.' });
+    }
+    if (room.image.revealed) return cb?.({ ok: false, error: '이미 결과가 공개되었습니다.' });
+    if (!room.players.has(targetId)) return cb?.({ ok: false, error: '잘못된 선택입니다.' });
+    room.image.votes[me.id] = targetId;
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  socket.on('player:leave', () => {
+    const room = rooms.get(socket.data.room);
+    if (!room) return;
+    if (room.status === 'lobby') room.players.delete(socket.data.playerId);
+    socket.data.room = null;
+    broadcast(room);
+  });
+
+  socket.on('disconnect', () => {
+    const room = rooms.get(socket.data.room);
+    const me = room?.players.get(socket.data.playerId);
+    if (!me || me.socketId !== socket.id) return;
+    me.connected = false;
+    me.socketId = null;
+    broadcast(room);
+  });
+});
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    if (now - room.updatedAt > ROOM_TTL_MS) rooms.delete(code);
+  }
+}, 10 * 60 * 1000).unref();
+
+server.listen(PORT, () => {
+  console.log(`Game room server listening on :${PORT} (CORS: ${CLIENT_ORIGIN.join(', ') || '*'})`);
+});
