@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { Layout, Ranking, RoleTag, useToast } from '../components/common'
 import { emit, socket } from '../socket'
-import { PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
+import { OUTCOME_TEXT, PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
 import type { PlayerState } from '../types'
 
 interface Session {
@@ -169,28 +169,71 @@ function MafiaView({ state }: { state: PlayerState }) {
   const info = ROLE_INFO[role]
 
   if (state.result) {
-    const { winner, reveals } = state.result
+    const { type, winner, reveals } = state.result
     const myTeam = role === 'mafia' ? 'mafia' : 'citizen'
     return (
       <>
         <section className={`card result-hero team-${winner}`}>
           <div className="hint">게임 결과</div>
           <div className="result-title">{winner === 'mafia' ? '🔪' : '🧑‍🤝‍🧑'} {TEAM_NAME[winner]} 승리!</div>
+          <div className="result-msg">{OUTCOME_TEXT[type]}</div>
           <div className="result-sub">{myTeam === winner ? '🎉 우리 팀이 이겼어요' : '아쉽게도 우리 팀이 졌어요'} · 나는 {info.name}</div>
         </section>
         <section className="card">
           <h2>정체 공개</h2>
-          {(['mafia', 'police', 'doctor'] as const).map((r) => {
-            const names = reveals.filter((x) => x.role === r)
-            if (!names.length) return null
-            return (
-              <div key={r} className="reveal-row">
-                <RoleTag role={r} />
-                <span>{names.map((n) => n.name).join(', ')}</span>
-              </div>
-            )
-          })}
+          {(['mafia', 'police', 'doctor'] as const).map((r) =>
+            reveals
+              .filter((x) => x.role === r)
+              .map((x) => (
+                <div key={x.name} className="reveal-row">
+                  <RoleTag role={r} />
+                  <span className="grow">
+                    {x.name}
+                    {!x.alive && <span className="me"> · 사망</span>}
+                    {x.mission && <span className="sub">미션: {x.mission}</span>}
+                  </span>
+                  {r === 'mafia' && (
+                    <span className={`mission-badge ${x.missionSuccess ? 'ok' : 'fail'}`}>
+                      {x.missionSuccess ? '미션 성공' : '미션 실패'}
+                    </span>
+                  )}
+                </div>
+              )),
+          )}
         </section>
+      </>
+    )
+  }
+
+  const missionCard = role === 'mafia' && (
+    <section className="card">
+      <h2>🤫 나의 미션</h2>
+      <div className="mission">{state.mission}</div>
+      <p className={`mission-status ${state.missionSuccess ? 'ok' : ''}`}>
+        {state.missionSuccess ? '✅ 미션 성공!' : '⏳ 미션 진행 중'}
+      </p>
+      <p className="hint">미션은 나만 알고 있습니다. 다른 마피아도 모릅니다.</p>
+      {state.mafiaTeam && state.mafiaTeam.length > 0 && (
+        <>
+          <label>함께하는 마피아</label>
+          <p className="team">{state.mafiaTeam.join(', ')}</p>
+        </>
+      )}
+    </section>
+  )
+
+  if (!state.alive) {
+    return (
+      <>
+        <section className="card dead-card">
+          <div className="role-emoji">💀</div>
+          <div className="dead-identity">
+            당신의 정체는 <RoleTag role={role} /> 입니다
+          </div>
+          <div className="dead-title">당신은 사망하셨습니다.</div>
+          <p className="hint">게임이 끝날 때까지 조용히 지켜봐 주세요.</p>
+        </section>
+        {missionCard}
       </>
     )
   }
@@ -221,19 +264,22 @@ function MafiaView({ state }: { state: PlayerState }) {
         </div>
       </section>
 
-      {shown && role === 'mafia' && (
-        <section className="card">
-          <h2>🤫 나의 미션</h2>
-          <div className="mission">{state.mission}</div>
-          <p className="hint">미션은 나만 알고 있습니다. 다른 마피아도 모릅니다.</p>
-          {state.mafiaTeam && state.mafiaTeam.length > 0 && (
-            <>
-              <label>함께하는 마피아</label>
-              <p className="team">{state.mafiaTeam.join(', ')}</p>
-            </>
-          )}
-        </section>
-      )}
+      {shown && missionCard}
+
+      <section className="card">
+        <label style={{ marginTop: 0 }}>생존자 ({state.players.filter((p) => p.alive).length} / {state.players.length})</label>
+        <ul className="players compact">
+          {state.players.map((p) => (
+            <li key={p.id} className={p.alive ? '' : 'dead'}>
+              <span className="grow">
+                <span className="pname">{p.name}</span>
+                {p.id === state.me.id && <span className="me"> (나)</span>}
+              </span>
+              {!p.alive && <span className="me">사망</span>}
+            </li>
+          ))}
+        </ul>
+      </section>
     </>
   )
 }

@@ -9,6 +9,12 @@ export const ROLE_INFO: Record<Role, { name: string; emoji: string; desc: string
 
 export const TEAM_NAME = { mafia: '마피아', citizen: '시민' } as const
 
+export const OUTCOME_TEXT = {
+  citizen: '시민이 승리했습니다.',
+  mafia: '마피아가 승리했습니다.',
+  'mission-fail': '마피아가 미션을 성공하지 못해 시민이 승리하였습니다.',
+} as const
+
 export function storageGet<T>(key: string): T | null {
   try {
     const raw = localStorage.getItem(key)

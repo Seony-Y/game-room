@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Layout, Ranking, RoleTag, useToast } from '../components/common'
 import SettingsForm, { type SettingsValues } from '../components/SettingsForm'
 import { emit, socket } from '../socket'
-import { adminKey, storageGet, storageSet, TEAM_NAME } from '../lib'
+import { adminKey, OUTCOME_TEXT, storageGet, storageSet } from '../lib'
 import type { AdminState, ImageSettings, MafiaSettings } from '../types'
 
 export default function AdminRoom() {
@@ -195,22 +195,37 @@ function SettingsSummary({ state }: { state: AdminState }) {
 const ROLE_ORDER = { mafia: 0, police: 1, doctor: 2, citizen: 3 } as const
 
 function MafiaPlay({ state, act }: { state: AdminState; act: Act }) {
-  const [winner, setWinner] = useState<'mafia' | 'citizen' | null>(state.mafiaResult?.winner ?? null)
   const players = [...state.players].sort((a, b) => ROLE_ORDER[a.role ?? 'citizen'] - ROLE_ORDER[b.role ?? 'citizen'])
+  const { outcome, resultShared } = state.mafia!
 
   return (
     <>
       <section className="card">
-        <h2>역할 배정 결과 <span className="hint">(관리자만 볼 수 있음)</span></h2>
+        <h2>진행 관리 <span className="hint">(역할은 관리자만 볼 수 있음)</span></h2>
         <ul className="players">
           {players.map((p) => (
-            <li key={p.id}>
+            <li key={p.id} className={p.alive ? '' : 'dead'}>
               <span className={`dot ${p.connected ? '' : 'off'}`} />
               <span className="grow">
-                {p.name}
+                <span className="pname">{p.name}</span> <RoleTag role={p.role} />
                 {p.mission && <span className="sub">미션: {p.mission}</span>}
               </span>
-              <RoleTag role={p.role} />
+              <span className="row-actions">
+                {p.role === 'mafia' && (
+                  <button
+                    className={`small ${p.missionSuccess ? 'success' : ''}`}
+                    onClick={() => act('admin:toggle-mission', { playerId: p.id })}
+                  >
+                    {p.missionSuccess ? '✅ 미션 성공' : '미션 성공'}
+                  </button>
+                )}
+                <button
+                  className={`small ${p.alive ? '' : 'danger'}`}
+                  onClick={() => act('admin:toggle-dead', { playerId: p.id })}
+                >
+                  {p.alive ? '탈락' : '탈락 취소'}
+                </button>
+              </span>
             </li>
           ))}
         </ul>
@@ -218,21 +233,22 @@ function MafiaPlay({ state, act }: { state: AdminState; act: Act }) {
 
       <section className="card">
         <h2>결과 보기</h2>
-        <label>승리팀 선택</label>
-        <div className="seg">
-          <button className={winner === 'citizen' ? 'active' : ''} onClick={() => setWinner('citizen')}>🧑‍🤝‍🧑 시민 승리</button>
-          <button className={winner === 'mafia' ? 'active' : ''} onClick={() => setWinner('mafia')}>🔪 마피아 승리</button>
+        <div className="stat-row">
+          <div><span>생존 마피아</span><b>{outcome.aliveMafia}</b></div>
+          <div><span>생존 시민팀</span><b>{outcome.aliveOthers}</b></div>
+          <div><span>미션 성공</span><b>{outcome.missionsDone} / {outcome.missionsTotal}</b></div>
         </div>
+        <p className={`judge ${outcome.type ? 'decided' : ''}`}>
+          {outcome.type ? `판정: ${OUTCOME_TEXT[outcome.type]}` : '아직 승패가 결정되지 않았습니다.'}
+        </p>
         <button
           className="primary big"
-          disabled={!winner}
-          onClick={() => act('admin:mafia-result', { winner }, '결과를 모든 사용자에게 공유했습니다')}
+          disabled={!outcome.type}
+          onClick={() => act('admin:mafia-result', undefined, '결과를 모든 사용자에게 공유했습니다')}
         >
-          {state.mafiaResult ? '결과 다시 공유' : '결과 공유'}
+          {resultShared ? '✅ 결과 공유됨' : '결과 공유'}
         </button>
-        {state.mafiaResult && (
-          <p className="hint center">✅ 공유됨: {TEAM_NAME[state.mafiaResult.winner]} 승리 · 마피아/경찰/의사 정체 공개</p>
-        )}
+        {resultShared && <p className="hint center">공유 후 탈락/미션을 바꾸면 사용자 화면의 결과도 바로 바뀝니다.</p>}
       </section>
     </>
   )

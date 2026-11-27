@@ -86,7 +86,38 @@ function validateSettings(gameType, capacity, input) {
 }
 
 function playerList(room) {
-  return [...room.players.values()].map((p) => ({ id: p.id, name: p.name, connected: p.connected }));
+  return [...room.players.values()].map((p) => ({ id: p.id, name: p.name, connected: p.connected, alive: p.alive }));
+}
+
+// 마피아 승패 자동 판정. 아직 결판이 안 났으면 null
+//  citizen      : 마피아 전원 탈락
+//  mafia        : 생존 마피아 >= 생존 시민팀 + 모든 미션 성공
+//  mission-fail : 생존 마피아 >= 생존 시민팀 이지만 미션 미완료 → 시민 승리
+function mafiaOutcome(room) {
+  const players = [...room.players.values()];
+  const mafias = players.filter((p) => p.role === ROLE.MAFIA);
+  const aliveMafia = mafias.filter((p) => p.alive).length;
+  const aliveOthers = players.filter((p) => p.alive && p.role !== ROLE.MAFIA).length;
+  const missionsDone = mafias.filter((p) => p.missionSuccess).length;
+  const base = { aliveMafia, aliveOthers, missionsDone, missionsTotal: mafias.length };
+  if (aliveMafia === 0) return { ...base, type: 'citizen', winner: ROLE.CITIZEN };
+  if (aliveMafia >= aliveOthers) {
+    return missionsDone === mafias.length
+      ? { ...base, type: 'mafia', winner: ROLE.MAFIA }
+      : { ...base, type: 'mission-fail', winner: ROLE.CITIZEN };
+  }
+  return { ...base, type: null, winner: null };
+}
+
+function mafiaReveals(room) {
+  return [...room.players.values()]
+    .filter((p) => p.role !== ROLE.CITIZEN)
+    .map((p) => ({
+      name: p.name,
+      role: p.role,
+      alive: p.alive,
+      ...(p.role === ROLE.MAFIA && { mission: p.mission, missionSuccess: p.missionSuccess }),
+    }));
 }
 
 // 득표 순위 (공동 순위: 1,1,3 ...)
@@ -120,9 +151,14 @@ function adminState(room) {
       connected: p.connected,
       role: p.role,
       mission: p.mission,
+      alive: p.alive,
+      missionSuccess: p.missionSuccess,
       votedFor: room.image?.votes[p.id] ?? null,
     })),
-    mafiaResult: room.mafiaResult,
+    mafia:
+      room.gameType === 'mafia' && room.status === 'playing'
+        ? { outcome: mafiaOutcome(room), resultShared: room.resultShared }
+        : null,
     image: room.image && {
       round: room.image.round,
       question: room.image.question,
@@ -146,20 +182,18 @@ function playerState(room, player) {
 
   if (room.gameType === 'mafia') {
     base.role = player.role;
+    base.alive = player.alive;
     if (player.role === ROLE.MAFIA) {
       // 미션은 본인 것만, 팀원은 이름만
       base.mission = player.mission;
+      base.missionSuccess = player.missionSuccess;
       base.mafiaTeam = [...room.players.values()]
         .filter((p) => p.role === ROLE.MAFIA && p.id !== player.id)
         .map((p) => p.name);
     }
-    if (room.mafiaResult) {
-      base.result = {
-        winner: room.mafiaResult.winner,
-        reveals: [...room.players.values()]
-          .filter((p) => p.role !== ROLE.CITIZEN)
-          .map((p) => ({ name: p.name, role: p.role })),
-      };
+    const outcome = room.resultShared ? mafiaOutcome(room) : null;
+    if (outcome?.type) {
+      base.result = { type: outcome.type, winner: outcome.winner, reveals: mafiaReveals(room) };
     }
   } else {
     base.image = {
@@ -218,7 +252,7 @@ io.on('connection', (socket) => {
       status: 'lobby',
       players: new Map(),
       image: null,
-      mafiaResult: null,
+      resultShared: false,
       updatedAt: Date.now(),
     };
     rooms.set(code, room);
@@ -279,7 +313,10 @@ io.on('connection', (socket) => {
       players.forEach((p, i) => {
         p.role = shuffledRoles[i];
         p.mission = p.role === ROLE.MAFIA ? shuffledMissions[missionIdx++] : null;
+        p.alive = true;
+        p.missionSuccess = false;
       });
+      room.resultShared = false;
     } else {
       startImageRound(room, room.settings.question);
     }
@@ -288,17 +325,44 @@ io.on('connection', (socket) => {
     broadcast(room);
   });
 
-  // 마피아 결과 공유: 승리팀 + 마피아/경찰/의사 정체 공개
-  socket.on('admin:mafia-result', ({ winner } = {}, cb) => {
+  function getMafiaPlaying(socket, cb) {
     const room = getAdminRoom(socket, cb);
-    if (!room) return;
+    if (!room) return null;
     if (room.gameType !== 'mafia' || room.status !== 'playing') {
-      return cb?.({ ok: false, error: '게임 진행 중에만 결과를 공유할 수 있습니다.' });
+      cb?.({ ok: false, error: '마피아 게임 진행 중에만 가능합니다.' });
+      return null;
     }
-    if (winner !== ROLE.MAFIA && winner !== ROLE.CITIZEN) {
-      return cb?.({ ok: false, error: '승리팀을 선택해주세요.' });
-    }
-    room.mafiaResult = { winner };
+    return room;
+  }
+
+  // 탈락 / 탈락 취소
+  socket.on('admin:toggle-dead', ({ playerId } = {}, cb) => {
+    const room = getMafiaPlaying(socket, cb);
+    const p = room?.players.get(playerId);
+    if (!room) return;
+    if (!p) return cb?.({ ok: false, error: '없는 참가자입니다.' });
+    p.alive = !p.alive;
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  // 마피아 미션 성공 / 취소
+  socket.on('admin:toggle-mission', ({ playerId } = {}, cb) => {
+    const room = getMafiaPlaying(socket, cb);
+    const p = room?.players.get(playerId);
+    if (!room) return;
+    if (!p || p.role !== ROLE.MAFIA) return cb?.({ ok: false, error: '마피아가 아닙니다.' });
+    p.missionSuccess = !p.missionSuccess;
+    cb?.({ ok: true });
+    broadcast(room);
+  });
+
+  // 마피아 결과 공유: 자동 판정 결과 + 시민 제외 역할 공개
+  socket.on('admin:mafia-result', (_, cb) => {
+    const room = getMafiaPlaying(socket, cb);
+    if (!room) return;
+    if (!mafiaOutcome(room).type) return cb?.({ ok: false, error: '아직 승패가 결정되지 않았습니다.' });
+    room.resultShared = true;
     cb?.({ ok: true });
     broadcast(room);
   });
@@ -331,10 +395,12 @@ io.on('connection', (socket) => {
     if (!room) return;
     room.status = 'lobby';
     room.image = null;
-    room.mafiaResult = null;
+    room.resultShared = false;
     for (const p of room.players.values()) {
       p.role = null;
       p.mission = null;
+      p.alive = true;
+      p.missionSuccess = false;
     }
     cb?.({ ok: true });
     broadcast(room);
@@ -399,6 +465,8 @@ io.on('connection', (socket) => {
       connected: true,
       role: null,
       mission: null,
+      alive: true,
+      missionSuccess: false,
     };
     room.players.set(player.id, player);
     socket.data.room = room.code;
