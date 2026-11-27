@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { Layout } from '../components/common'
-import SettingsForm, { DEFAULT_SETTINGS, type SettingsValues } from '../components/SettingsForm'
+import SettingsForm from '../components/SettingsForm'
+import { DEFAULT_SETTINGS, type SettingsValues } from '../settings'
 import { emit } from '../socket'
 import { adminKey, storageSet } from '../lib'
 

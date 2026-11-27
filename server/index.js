@@ -210,6 +210,8 @@ function playerState(room, player) {
 
 function broadcast(room) {
   room.updatedAt = Date.now();
+  // 결과 공유 후 탈락 취소 등으로 승패가 다시 미정이 되면 공유 상태 해제
+  if (room.resultShared && room.gameType === 'mafia' && !mafiaOutcome(room).type) room.resultShared = false;
   io.to(`admin:${room.code}`).emit('admin:state', adminState(room));
   for (const p of room.players.values()) {
     if (p.socketId) io.to(p.socketId).emit('player:state', playerState(room, p));
@@ -253,6 +255,7 @@ io.on('connection', (socket) => {
       players: new Map(),
       image: null,
       resultShared: false,
+      banned: new Set(), // 내보낸 기기 ID (스스로 나간 경우는 제외)
       updatedAt: Date.now(),
     };
     rooms.set(code, room);
@@ -412,6 +415,7 @@ io.on('connection', (socket) => {
     const p = room.players.get(playerId);
     if (!p) return cb?.({ ok: false, error: '없는 참가자입니다.' });
     if (p.socketId) io.to(p.socketId).emit('player:kicked');
+    if (p.deviceId) room.banned.add(p.deviceId);
     room.players.delete(playerId);
     if (room.image) {
       delete room.image.votes[playerId];
@@ -435,9 +439,13 @@ io.on('connection', (socket) => {
   });
 
   // ───────────── PLAYER ─────────────
-  socket.on('player:join', ({ code, name, playerId } = {}, cb) => {
+  socket.on('player:join', ({ code, name, playerId, deviceId } = {}, cb) => {
     const room = rooms.get(String(code || '').trim().toUpperCase());
     if (!room) return cb?.({ ok: false, error: '존재하지 않는 방 코드입니다.' });
+    const device = cleanText(deviceId, 64);
+    if (device && room.banned.has(device)) {
+      return cb?.({ ok: false, error: '관리자가 내보낸 방에는 다시 입장할 수 없습니다.' });
+    }
 
     // 재접속 (새로고침 등)
     const existing = playerId && room.players.get(playerId);
@@ -467,6 +475,7 @@ io.on('connection', (socket) => {
       mission: null,
       alive: true,
       missionSuccess: false,
+      deviceId: device || null,
     };
     room.players.set(player.id, player);
     socket.data.room = room.code;

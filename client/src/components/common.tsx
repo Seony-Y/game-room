@@ -1,20 +1,7 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react'
-import { socket } from '../socket'
+import type { ReactNode } from 'react'
+import { useConnected } from '../hooks'
 import { ROLE_INFO } from '../lib'
 import type { RankEntry, Role } from '../types'
-
-function subscribeConnection(onChange: () => void) {
-  socket.on('connect', onChange)
-  socket.on('disconnect', onChange)
-  return () => {
-    socket.off('connect', onChange)
-    socket.off('disconnect', onChange)
-  }
-}
-
-export function useConnected() {
-  return useSyncExternalStore(subscribeConnection, () => socket.connected)
-}
 
 export function Layout({ title, badge, children }: { title: string; badge?: string; children: ReactNode }) {
   const connected = useConnected()
@@ -63,13 +50,6 @@ export function Ranking({ entries, emptyText = '아직 투표가 없습니다.' 
   )
 }
 
-export function useToast() {
-  const [msg, setMsg] = useState('')
-  useEffect(() => {
-    if (!msg) return
-    const t = setTimeout(() => setMsg(''), 2200)
-    return () => clearTimeout(t)
-  }, [msg])
-  const node = <div className={`toast ${msg ? 'show' : ''}`}>{msg}</div>
-  return [node, setMsg] as const
+export function Toast({ msg }: { msg: string }) {
+  return <div className={`toast ${msg ? 'show' : ''}`}>{msg}</div>
 }

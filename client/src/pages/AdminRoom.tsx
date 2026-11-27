@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Layout, Ranking, RoleTag, useToast } from '../components/common'
-import SettingsForm, { type SettingsValues } from '../components/SettingsForm'
+import { Layout, Ranking, RoleTag, Toast } from '../components/common'
+import SettingsForm from '../components/SettingsForm'
+import { useToast } from '../hooks'
+import type { SettingsValues } from '../settings'
 import { emit, socket } from '../socket'
 import { adminKey, OUTCOME_TEXT, storageGet, storageSet } from '../lib'
 import type { AdminState, ImageSettings, MafiaSettings } from '../types'
@@ -13,7 +15,7 @@ export default function AdminRoom() {
   const [saved] = useState(() => storageGet<{ adminToken: string }>(adminKey(code)))
   const [error, setFatal] = useState('')
   const fatal = saved ? error : '이 브라우저에는 해당 방의 관리 권한이 없습니다.'
-  const [toastNode, toast] = useToast()
+  const [toastMsg, toast] = useToast()
 
   useEffect(() => {
     if (!saved) return
@@ -108,7 +110,7 @@ export default function AdminRoom() {
           <ConfirmButton label="방 닫기" confirmLabel="정말 닫을까요?" onConfirm={() => act('admin:close')} />
         </div>
       </section>
-      {toastNode}
+      <Toast msg={toastMsg} />
     </Layout>
   )
 }

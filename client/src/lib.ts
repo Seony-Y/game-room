@@ -34,4 +34,16 @@ export function storageSet(key: string, value: unknown) {
 }
 
 export const adminKey = (code: string) => `admin:${code}`
+
+// 브라우저별 고유 ID (내보낸 사람 재입장 차단용)
+let memoryDeviceId: string | null = null
+export function getDeviceId() {
+  let id = storageGet<string>('deviceId') ?? memoryDeviceId
+  if (!id) {
+    id = crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+    storageSet('deviceId', id)
+  }
+  memoryDeviceId = id
+  return id
+}
 export const PLAYER_KEY = 'player'

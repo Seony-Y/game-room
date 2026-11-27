@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Layout, Ranking, RoleTag, useToast } from '../components/common'
+import { Layout, Ranking, RoleTag, Toast } from '../components/common'
+import { useToast } from '../hooks'
 import { emit, socket } from '../socket'
-import { OUTCOME_TEXT, PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
+import { getDeviceId, OUTCOME_TEXT, PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
 import type { PlayerState } from '../types'
 
 interface Session {
@@ -22,7 +23,7 @@ export default function Join() {
   })
   const [state, setState] = useState<PlayerState | null>(null)
   const [notice, setNotice] = useState('')
-  const [toastNode, toast] = useToast()
+  const [toastMsg, toast] = useToast()
   const sessionRef = useRef(session)
   useEffect(() => {
     sessionRef.current = session
@@ -40,7 +41,7 @@ export default function Join() {
     const rejoin = async () => {
       const s = sessionRef.current
       if (!s) return
-      const res = await emit<JoinAck>('player:join', s)
+      const res = await emit<JoinAck>('player:join', { ...s, deviceId: getDeviceId() })
       if (!res.ok) leaveSession(res.error)
     }
     const onState = (s: PlayerState) => setState(s)
@@ -60,7 +61,7 @@ export default function Join() {
   }, [])
 
   const join = async (code: string, name: string) => {
-    const res = await emit<JoinAck>('player:join', { code, name })
+    const res = await emit<JoinAck>('player:join', { code, name, deviceId: getDeviceId() })
     if (!res.ok) return res.error
     const s = { code: res.code, playerId: res.playerId, name: res.name }
     storageSet(PLAYER_KEY, s)
@@ -97,7 +98,7 @@ export default function Join() {
       {state.status === 'lobby' && <Waiting state={state} onLeave={leave} />}
       {state.status === 'playing' && state.gameType === 'mafia' && <MafiaView state={state} />}
       {state.status === 'playing' && state.gameType === 'image' && <ImageView state={state} toast={toast} />}
-      {toastNode}
+      <Toast msg={toastMsg} />
     </Layout>
   )
 }
