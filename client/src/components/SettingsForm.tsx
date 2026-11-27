@@ -45,6 +45,12 @@ export default function SettingsForm({ initial, lockGameType, submitLabel, onSub
       missions: Array.from({ length: Math.min(n, 20) }, (_, i) => prev.missions[i] ?? ''),
     }))
 
+  // 입력 초기화: 게임 종류는 유지하고 나머지를 기본값으로
+  const reset = () => {
+    setV((prev) => ({ ...DEFAULT_SETTINGS, missions: [...DEFAULT_SETTINGS.missions], gameType: prev.gameType }))
+    setError('')
+  }
+
   const citizens = v.capacity - v.mafia - v.doctor - v.police
 
   const submit = async () => {
@@ -129,9 +135,14 @@ export default function SettingsForm({ initial, lockGameType, submitLabel, onSub
       )}
 
       <p className="error">{error}</p>
-      <button className="primary big" disabled={busy} onClick={submit}>
-        {submitLabel}
-      </button>
+      <div className="form-actions">
+        <button type="button" disabled={busy} onClick={reset}>
+          입력 초기화
+        </button>
+        <button className="primary" disabled={busy} onClick={submit}>
+          {submitLabel}
+        </button>
+      </div>
     </div>
   )
 }
