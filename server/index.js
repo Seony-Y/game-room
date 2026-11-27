@@ -56,24 +56,24 @@ function cleanText(v, max = 200) {
 // 설정 검증. 성공 시 { settings }, 실패 시 { error }
 function validateSettings(gameType, capacity, input) {
   if (!Number.isFinite(capacity) || capacity < 2 || capacity > 50) {
-    return { error: '참가 인원은 2~50명 사이로 입력해주세요.' };
+    return { error: '참가 인원은 2~50명이에요.' };
   }
   if (gameType === 'mafia') {
     const mafia = toInt(input.mafia, 1);
     const doctor = toInt(input.doctor);
     const police = toInt(input.police);
     if ([mafia, doctor, police].some(Number.isNaN)) {
-      return { error: '마피아는 1명 이상, 의사/경찰은 0명 이상이어야 합니다.' };
+      return { error: '역할 인원 수를 확인해주세요.' };
     }
     if (mafia + doctor + police > capacity) {
-      return { error: '마피아+의사+경찰 수가 참가 인원보다 많습니다.' };
+      return { error: '역할 수가 참가 인원보다 많아요.' };
     }
     if (mafia >= capacity - mafia) {
-      return { error: '마피아 수는 나머지 인원보다 적어야 합니다.' };
+      return { error: '마피아는 나머지보다 적어야 해요.' };
     }
     const missions = Array.isArray(input.missions) ? input.missions.map((m) => cleanText(m)) : [];
     if (missions.length !== mafia || missions.some((m) => !m)) {
-      return { error: `마피아 미션을 ${mafia}개 모두 입력해주세요.` };
+      return { error: `미션을 ${mafia}개 모두 입력해주세요.` };
     }
     return { settings: { mafia, doctor, police, missions } };
   }
@@ -221,7 +221,7 @@ function broadcast(room) {
 function getAdminRoom(socket, cb) {
   const room = rooms.get(socket.data.adminCode);
   if (!room) {
-    cb?.({ ok: false, error: '방 관리 권한이 없습니다.' });
+    cb?.({ ok: false, error: '방 관리 권한이 없어요.' });
     return null;
   }
   return room;
@@ -268,7 +268,7 @@ io.on('connection', (socket) => {
   socket.on('admin:join', ({ code, adminToken } = {}, cb) => {
     const room = rooms.get(String(code || '').toUpperCase());
     if (!room || room.adminToken !== adminToken) {
-      return cb?.({ ok: false, error: '방이 없거나 관리 권한이 없습니다.' });
+      return cb?.({ ok: false, error: '방이 없거나 권한이 없어요.' });
     }
     socket.data.adminCode = room.code;
     socket.join(`admin:${room.code}`);
@@ -279,10 +279,10 @@ io.on('connection', (socket) => {
   socket.on('admin:update', (input = {}, cb) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
-    if (room.status !== 'lobby') return cb?.({ ok: false, error: '게임 진행 중에는 설정을 바꿀 수 없습니다.' });
+    if (room.status !== 'lobby') return cb?.({ ok: false, error: '진행 중엔 설정을 바꿀 수 없어요.' });
     const capacity = toInt(input.capacity ?? room.capacity, 2);
     if (capacity < room.players.size) {
-      return cb?.({ ok: false, error: `이미 ${room.players.size}명이 입장해 있습니다.` });
+      return cb?.({ ok: false, error: `이미 ${room.players.size}명이 입장했어요.` });
     }
     const { settings, error } = validateSettings(room.gameType, capacity, { ...room.settings, ...input });
     if (error) return cb?.({ ok: false, error });
@@ -295,14 +295,14 @@ io.on('connection', (socket) => {
   socket.on('admin:start', (_, cb) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
-    if (room.status !== 'lobby') return cb?.({ ok: false, error: '이미 시작된 게임입니다.' });
+    if (room.status !== 'lobby') return cb?.({ ok: false, error: '이미 시작된 게임이에요.' });
     const players = [...room.players.values()];
-    if (players.length < 2) return cb?.({ ok: false, error: '최소 2명 이상 입장해야 합니다.' });
+    if (players.length < 2) return cb?.({ ok: false, error: '2명 이상 입장해야 해요.' });
 
     if (room.gameType === 'mafia') {
       const { mafia, doctor, police, missions } = room.settings;
       if (players.length !== room.capacity) {
-        return cb?.({ ok: false, error: `참가 인원(${room.capacity}명)이 모두 입장해야 시작할 수 있습니다. (현재 ${players.length}명)` });
+        return cb?.({ ok: false, error: `${room.capacity}명이 모두 입장해야 해요. (현재 ${players.length}명)` });
       }
       const roles = [
         ...Array(mafia).fill(ROLE.MAFIA),
@@ -332,7 +332,7 @@ io.on('connection', (socket) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return null;
     if (room.gameType !== 'mafia' || room.status !== 'playing') {
-      cb?.({ ok: false, error: '마피아 게임 진행 중에만 가능합니다.' });
+      cb?.({ ok: false, error: '마피아 게임 중에만 가능해요.' });
       return null;
     }
     return room;
@@ -343,7 +343,7 @@ io.on('connection', (socket) => {
     const room = getMafiaPlaying(socket, cb);
     const p = room?.players.get(playerId);
     if (!room) return;
-    if (!p) return cb?.({ ok: false, error: '없는 참가자입니다.' });
+    if (!p) return cb?.({ ok: false, error: '없는 참가자예요.' });
     p.alive = !p.alive;
     cb?.({ ok: true });
     broadcast(room);
@@ -354,7 +354,7 @@ io.on('connection', (socket) => {
     const room = getMafiaPlaying(socket, cb);
     const p = room?.players.get(playerId);
     if (!room) return;
-    if (!p || p.role !== ROLE.MAFIA) return cb?.({ ok: false, error: '마피아가 아닙니다.' });
+    if (!p || p.role !== ROLE.MAFIA) return cb?.({ ok: false, error: '마피아가 아니에요.' });
     p.missionSuccess = !p.missionSuccess;
     cb?.({ ok: true });
     broadcast(room);
@@ -364,7 +364,7 @@ io.on('connection', (socket) => {
   socket.on('admin:mafia-result', (_, cb) => {
     const room = getMafiaPlaying(socket, cb);
     if (!room) return;
-    if (!mafiaOutcome(room).type) return cb?.({ ok: false, error: '아직 승패가 결정되지 않았습니다.' });
+    if (!mafiaOutcome(room).type) return cb?.({ ok: false, error: '아직 승패가 나지 않았어요.' });
     room.resultShared = true;
     cb?.({ ok: true });
     broadcast(room);
@@ -374,7 +374,7 @@ io.on('connection', (socket) => {
   socket.on('admin:reveal', (_, cb) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
-    if (room.gameType !== 'image' || !room.image) return cb?.({ ok: false, error: '진행 중인 질문이 없습니다.' });
+    if (room.gameType !== 'image' || !room.image) return cb?.({ ok: false, error: '진행 중인 질문이 없어요.' });
     room.image.revealed = true;
     cb?.({ ok: true });
     broadcast(room);
@@ -383,7 +383,7 @@ io.on('connection', (socket) => {
   socket.on('admin:next-question', ({ question } = {}, cb) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
-    if (room.gameType !== 'image') return cb?.({ ok: false, error: '이미지 게임이 아닙니다.' });
+    if (room.gameType !== 'image') return cb?.({ ok: false, error: '이미지 게임이 아니에요.' });
     const q = cleanText(question);
     if (!q) return cb?.({ ok: false, error: '질문을 입력해주세요.' });
     room.settings.question = q;
@@ -413,7 +413,7 @@ io.on('connection', (socket) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
     const p = room.players.get(playerId);
-    if (!p) return cb?.({ ok: false, error: '없는 참가자입니다.' });
+    if (!p) return cb?.({ ok: false, error: '없는 참가자예요.' });
     if (p.socketId) io.to(p.socketId).emit('player:kicked');
     if (p.deviceId) room.banned.add(p.deviceId);
     room.players.delete(playerId);
@@ -441,10 +441,10 @@ io.on('connection', (socket) => {
   // ───────────── PLAYER ─────────────
   socket.on('player:join', ({ code, name, playerId, deviceId } = {}, cb) => {
     const room = rooms.get(String(code || '').trim().toUpperCase());
-    if (!room) return cb?.({ ok: false, error: '존재하지 않는 방 코드입니다.' });
+    if (!room) return cb?.({ ok: false, error: '없는 방 코드예요.' });
     const device = cleanText(deviceId, 64);
     if (device && room.banned.has(device)) {
-      return cb?.({ ok: false, error: '관리자가 내보낸 방에는 다시 입장할 수 없습니다.' });
+      return cb?.({ ok: false, error: '내보내진 방이라 입장할 수 없어요.' });
     }
 
     // 재접속 (새로고침 등)
@@ -458,12 +458,12 @@ io.on('connection', (socket) => {
       return broadcast(room);
     }
 
-    const nickname = cleanText(name, 20);
+    const nickname = cleanText(name, 8);
     if (!nickname) return cb?.({ ok: false, error: '닉네임을 입력해주세요.' });
-    if (room.status !== 'lobby') return cb?.({ ok: false, error: '이미 게임이 시작된 방입니다.' });
-    if (room.players.size >= room.capacity) return cb?.({ ok: false, error: '방 인원이 가득 찼습니다.' });
+    if (room.status !== 'lobby') return cb?.({ ok: false, error: '이미 게임이 시작된 방이에요.' });
+    if (room.players.size >= room.capacity) return cb?.({ ok: false, error: '방 인원이 가득 찼어요.' });
     if ([...room.players.values()].some((p) => p.name === nickname)) {
-      return cb?.({ ok: false, error: '이미 사용 중인 닉네임입니다.' });
+      return cb?.({ ok: false, error: '이미 사용 중인 닉네임이에요.' });
     }
 
     const player = {
@@ -488,10 +488,10 @@ io.on('connection', (socket) => {
     const room = rooms.get(socket.data.room);
     const me = room?.players.get(socket.data.playerId);
     if (!room || !me || room.gameType !== 'image' || room.status !== 'playing' || !room.image) {
-      return cb?.({ ok: false, error: '지금은 투표할 수 없습니다.' });
+      return cb?.({ ok: false, error: '지금은 투표할 수 없어요.' });
     }
-    if (room.image.revealed) return cb?.({ ok: false, error: '이미 결과가 공개되었습니다.' });
-    if (!room.players.has(targetId)) return cb?.({ ok: false, error: '잘못된 선택입니다.' });
+    if (room.image.revealed) return cb?.({ ok: false, error: '이미 결과가 공개됐어요.' });
+    if (!room.players.has(targetId)) return cb?.({ ok: false, error: '잘못된 선택이에요.' });
     room.image.votes[me.id] = targetId;
     cb?.({ ok: true });
     broadcast(room);

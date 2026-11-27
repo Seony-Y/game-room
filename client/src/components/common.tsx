@@ -13,7 +13,7 @@ export function Layout({ title, badge, children }: { title: string; badge?: stri
         </h1>
         <div className="conn">
           <span className={`dot ${connected ? '' : 'off'}`} />
-          {connected ? '실시간 연결됨' : '연결 중…'}
+          {connected ? '연결됨' : '연결 중…'}
         </div>
       </header>
       {children}

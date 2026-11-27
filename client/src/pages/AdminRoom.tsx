@@ -5,7 +5,7 @@ import SettingsForm from '../components/SettingsForm'
 import { useToast } from '../hooks'
 import type { SettingsValues } from '../settings'
 import { emit, socket } from '../socket'
-import { adminKey, OUTCOME_TEXT, storageGet, storageSet } from '../lib'
+import { adminKey, OUTCOME_LINES, storageGet, storageSet } from '../lib'
 import type { AdminState, ImageSettings, MafiaSettings } from '../types'
 
 export default function AdminRoom() {
@@ -14,7 +14,7 @@ export default function AdminRoom() {
   const [state, setState] = useState<AdminState | null>(null)
   const [saved] = useState(() => storageGet<{ adminToken: string }>(adminKey(code)))
   const [error, setFatal] = useState('')
-  const fatal = saved ? error : '이 브라우저에는 해당 방의 관리 권한이 없습니다.'
+  const fatal = saved ? error : '이 브라우저엔 관리 권한이 없어요.'
   const [toastMsg, toast] = useToast()
 
   useEffect(() => {
@@ -27,7 +27,7 @@ export default function AdminRoom() {
     const onState = (s: AdminState) => setState(s)
     const onClosed = () => {
       storageSet(adminKey(code), null)
-      setFatal('방이 닫혔습니다.')
+      setFatal('방이 닫혔어요.')
     }
     socket.on('connect', join)
     socket.on('admin:state', onState)
@@ -90,7 +90,7 @@ export default function AdminRoom() {
           <input readOnly value={joinUrl} onFocus={(e) => e.target.select()} />
           <button
             className="small"
-            onClick={() => navigator.clipboard?.writeText(joinUrl).then(() => toast('복사했습니다'), () => toast('복사에 실패했습니다'))}
+            onClick={() => navigator.clipboard?.writeText(joinUrl).then(() => toast('복사했어요'), () => toast('복사에 실패했어요'))}
           >
             복사
           </button>
@@ -104,7 +104,7 @@ export default function AdminRoom() {
       <section className="card">
         <div className="actions" style={{ marginTop: 0 }}>
           {state.status === 'playing' && (
-            <button onClick={() => act('admin:reset', undefined, '대기실로 돌아갔습니다')}>대기실로 돌아가기 (다시 하기)</button>
+            <button onClick={() => act('admin:reset', undefined, '대기실로 돌아갔어요')}>대기실로 돌아가기 (다시 하기)</button>
           )}
           <button className="ghost" onClick={() => navigate('/admin')}>새 방 만들기</button>
           <ConfirmButton label="방 닫기" confirmLabel="정말 닫을까요?" onConfirm={() => act('admin:close')} />
@@ -123,8 +123,8 @@ function Lobby({ state, act }: { state: AdminState; act: Act }) {
   const canStart = state.gameType === 'mafia' ? count === state.capacity : count >= 2
   const startHint =
     state.gameType === 'mafia'
-      ? canStart ? '' : `참가 인원 ${state.capacity}명이 모두 입장해야 시작할 수 있습니다.`
-      : canStart ? '' : '2명 이상 입장해야 시작할 수 있습니다.'
+      ? canStart ? '' : `${state.capacity}명이 모두 입장해야 시작돼요.`
+      : canStart ? '' : '2명 이상 입장해야 시작돼요.'
 
   const settingsValues: SettingsValues =
     state.gameType === 'mafia'
@@ -145,7 +145,7 @@ function Lobby({ state, act }: { state: AdminState; act: Act }) {
           참가자 <span className="badge">{count} / {state.capacity}</span>
         </h2>
         {count === 0 ? (
-          <p className="hint">아직 입장한 사람이 없습니다. 입장 URL을 공유해주세요.</p>
+          <p className="hint">입장 URL을 공유해주세요.</p>
         ) : (
           <ul className="players">
             {state.players.map((p) => (
@@ -203,10 +203,10 @@ function MafiaPlay({ state, act }: { state: AdminState; act: Act }) {
   return (
     <>
       <section className="card">
-        <h2>진행 관리 <span className="hint">(역할은 관리자만 볼 수 있음)</span></h2>
+        <h2>진행 관리 <span className="hint">(관리자만 보임)</span></h2>
         <ul className="players">
           {players.map((p) => (
-            <li key={p.id} className={p.alive ? '' : 'dead'}>
+            <li key={p.id} className={`play-row ${p.mission ? 'has-mission' : ''} ${p.alive ? '' : 'dead'}`}>
               <span className={`dot ${p.connected ? '' : 'off'}`} />
               <span className="grow">
                 <span className="pname">{p.name}</span> <RoleTag role={p.role} />
@@ -241,16 +241,18 @@ function MafiaPlay({ state, act }: { state: AdminState; act: Act }) {
           <div><span>미션 성공</span><b>{outcome.missionsDone} / {outcome.missionsTotal}</b></div>
         </div>
         <p className={`judge ${outcome.type ? 'decided' : ''}`}>
-          {outcome.type ? `판정: ${OUTCOME_TEXT[outcome.type]}` : '아직 승패가 결정되지 않았습니다.'}
+          {outcome.type
+            ? OUTCOME_LINES[outcome.type].map((l) => <span key={l} className="line">{l}</span>)
+            : '아직 승패가 나지 않았어요.'}
         </p>
         <button
           className="primary big"
           disabled={!outcome.type}
-          onClick={() => act('admin:mafia-result', undefined, '결과를 모든 사용자에게 공유했습니다')}
+          onClick={() => act('admin:mafia-result', undefined, '결과를 공유했어요')}
         >
           {resultShared ? '✅ 결과 공유됨' : '결과 공유'}
         </button>
-        {resultShared && <p className="hint center">공유 후 탈락/미션을 바꾸면 사용자 화면의 결과도 바로 바뀝니다.</p>}
+        {resultShared && <p className="hint center">바꾸면 사용자 결과도 바로 바뀌어요.</p>}
       </section>
     </>
   )
@@ -272,7 +274,7 @@ function ImagePlay({ state, act }: { state: AdminState; act: Act }) {
       <div className="question">{img.question}</div>
       <p className="progress-text">{img.votedCount} / {state.players.length}명 투표 완료</p>
 
-      <p className="hint">실시간 집계 (관리자만 보임) · 결과 공유 시 사용자에게는 3위까지 공개됩니다.</p>
+      <p className="hint">실시간 집계 (관리자만 보임)</p>
       <Ranking entries={img.results} />
 
       <button className="small ghost" onClick={() => setShowVotes((s) => !s)}>
@@ -292,13 +294,13 @@ function ImagePlay({ state, act }: { state: AdminState; act: Act }) {
       <button
         className="primary big"
         disabled={img.revealed}
-        onClick={() => act('admin:reveal', undefined, '결과를 모든 사용자에게 공유했습니다')}
+        onClick={() => act('admin:reveal', undefined, '결과를 공유했어요')}
       >
-        {img.revealed ? '✅ 결과 공유됨' : '결과 공유'}
+        {img.revealed ? '✅ 결과 공유됨' : '결과 공유 (TOP 3 공개)'}
       </button>
 
       <label htmlFor="next">다음 질문</label>
-      <textarea id="next" placeholder="다음 질문을 입력하세요" maxLength={200} value={next} onChange={(e) => setNext(e.target.value)} />
+      <textarea id="next" placeholder="다음 질문 입력" maxLength={200} value={next} onChange={(e) => setNext(e.target.value)} />
       <div className="actions">
         <button disabled={!next.trim()} onClick={startNext}>다음 질문 시작</button>
       </div>

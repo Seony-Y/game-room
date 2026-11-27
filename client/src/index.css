@@ -38,7 +38,13 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard', 'Malgun Gothic', sans-serif;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  /* 한글은 어절 단위로 줄바꿈, 띄어쓰기 없는 긴 문자열만 강제 줄바꿈 */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
+
+/* 의도적으로 나눈 줄 */
+.line { display: block; }
 
 a { color: inherit; }
 
@@ -247,7 +253,18 @@ ul.players.compact li { padding: 6px 0; font-size: 14px; }
 .result-title { font-size: 32px; font-weight: 800; letter-spacing: -0.02em; margin: 8px 0 4px; }
 .result-sub { font-size: 15px; opacity: 0.9; }
 
-.reveal-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); font-weight: 600; }
+.reveal-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+.reveal-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reveal-mission { grid-column: 2 / -1; font-size: 13px; font-weight: 400; color: var(--muted); }
+.result-crown { font-size: 28px; line-height: 1; margin-top: 6px; }
 .reveal-row:last-child { border-bottom: 0; }
 
 .waiting { padding: 12px 0 4px; }
@@ -288,7 +305,6 @@ ul.players.compact li { padding: 6px 0; font-size: 14px; }
 @media (max-width: 480px) {
   .grid3 { gap: 6px; }
   .room-code { font-size: 30px; }
-  header.top h1 { font-size: 18px; }
 }
 
 /* 마피아 진행 */
@@ -316,6 +332,32 @@ button.success { background: var(--ok); border-color: var(--ok); color: #fff; }
 .mission-badge.fail { background: var(--surface-2); color: var(--muted); }
 .result-msg { font-size: 17px; font-weight: 700; margin: 4px 0 8px; }
 
+
+
+/* 이름은 한 줄 유지 */
+.pname { white-space: nowrap; }
+
+/* ── 모바일 (360px까지 줄떨어짐 없게) ── */
 @media (max-width: 480px) {
-  .row-actions { flex-direction: column; }
+  .wrap { padding: 20px 16px 48px; }
+  .card { padding: 16px; }
+  .seg button { font-size: 15px; padding: 11px 6px; white-space: nowrap; }
+  .form-actions { grid-template-columns: 1fr 1.6fr; }
+  .form-actions button { font-size: 16px; padding: 14px 8px; white-space: nowrap; }
+  button.big { font-size: 16px; }
+  .question { font-size: 19px; }
+  .role-card { padding: 32px 16px; }
+  .role-name { font-size: 34px; }
+  .dead-card { padding: 24px 16px; }
+  .dead-title { font-size: 24px; }
+  .result-title { font-size: 26px; }
+  .result-msg { font-size: 16px; }
+  .pick-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .pick-grid button { font-size: 15px; padding: 14px 6px; }
+  .stat-row b { font-size: 18px; }
+  /* 진행 관리: 버튼을 이름 아래 줄로 */
+  ul.players li.play-row.has-mission { flex-wrap: wrap; row-gap: 8px; }
+  ul.players li.play-row.has-mission .row-actions { width: 100%; justify-content: flex-end; }
+  header.top h1 { font-size: 18px; white-space: nowrap; }
+  header.top .badge { font-size: 11px; padding: 2px 8px; }
 }

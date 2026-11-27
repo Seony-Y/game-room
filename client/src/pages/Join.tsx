@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { Layout, Ranking, RoleTag, Toast } from '../components/common'
 import { useToast } from '../hooks'
 import { emit, socket } from '../socket'
-import { getDeviceId, OUTCOME_TEXT, PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
+import { getDeviceId, OUTCOME_LINES, PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
 import type { PlayerState } from '../types'
 
 interface Session {
@@ -45,8 +45,8 @@ export default function Join() {
       if (!res.ok) leaveSession(res.error)
     }
     const onState = (s: PlayerState) => setState(s)
-    const onKicked = () => leaveSession('관리자가 방에서 내보냈습니다.')
-    const onClosed = () => leaveSession('방이 닫혔습니다.')
+    const onKicked = () => leaveSession('관리자가 방에서 내보냈어요.')
+    const onClosed = () => leaveSession('방이 닫혔어요.')
     socket.on('connect', rejoin)
     socket.on('player:state', onState)
     socket.on('player:kicked', onKicked)
@@ -131,7 +131,7 @@ function JoinForm({ initialCode, onJoin }: { initialCode: string; onJoin: (code:
         onChange={(e) => setCode(e.target.value.toUpperCase())}
       />
       <label htmlFor="name">닉네임</label>
-      <input id="name" placeholder="이름을 입력하세요" maxLength={20} value={name} onChange={(e) => setName(e.target.value)} />
+      <input id="name" placeholder="최대 8자" maxLength={8} value={name} onChange={(e) => setName(e.target.value)} />
       <p className="error">{error}</p>
       <button className="primary big" type="submit" disabled={busy || code.trim().length < 5 || !name.trim()}>
         입장하기
@@ -145,7 +145,7 @@ function Waiting({ state, onLeave }: { state: PlayerState; onLeave: () => void }
     <section className="card">
       <div className="center waiting">
         <div className="pulse" />
-        <h2>관리자가 게임을 시작하기를 기다리는 중…</h2>
+        <h2>게임 시작을 기다리는 중…</h2>
         <p className="hint">{state.gameType === 'mafia' ? '🕵️ 마피아 게임' : '🖼️ 이미지 게임'}</p>
       </div>
       <label>참가자 ({state.players.length} / {state.capacity})</label>
@@ -177,8 +177,8 @@ function MafiaView({ state }: { state: PlayerState }) {
         <section className={`card result-hero team-${winner}`}>
           <div className="hint">게임 결과</div>
           <div className="result-title">{winner === 'mafia' ? '🔪' : '🧑‍🤝‍🧑'} {TEAM_NAME[winner]} 승리!</div>
-          <div className="result-msg">{OUTCOME_TEXT[type]}</div>
-          <div className="result-sub">{myTeam === winner ? '🎉 우리 팀이 이겼어요' : '아쉽게도 우리 팀이 졌어요'} · 나는 {info.name}</div>
+          <div className="result-msg">{OUTCOME_LINES[type].map((l) => <span key={l} className="line">{l}</span>)}</div>
+          <div className="result-sub">{myTeam === winner ? '🎉 우리 팀 승리' : '😢 우리 팀 패배'} · 나는 {info.name}</div>
         </section>
         <section className="card">
           <h2>정체 공개</h2>
@@ -188,16 +188,16 @@ function MafiaView({ state }: { state: PlayerState }) {
               .map((x) => (
                 <div key={x.name} className="reveal-row">
                   <RoleTag role={r} />
-                  <span className="grow">
+                  <span className="reveal-name">
                     {x.name}
                     {!x.alive && <span className="me"> · 사망</span>}
-                    {x.mission && <span className="sub">미션: {x.mission}</span>}
                   </span>
                   {r === 'mafia' && (
                     <span className={`mission-badge ${x.missionSuccess ? 'ok' : 'fail'}`}>
                       {x.missionSuccess ? '미션 성공' : '미션 실패'}
                     </span>
                   )}
+                  {x.mission && <span className="reveal-mission">미션: {x.mission}</span>}
                 </div>
               )),
           )}
@@ -213,7 +213,7 @@ function MafiaView({ state }: { state: PlayerState }) {
       <p className={`mission-status ${state.missionSuccess ? 'ok' : ''}`}>
         {state.missionSuccess ? '✅ 미션 성공!' : '⏳ 미션 진행 중'}
       </p>
-      <p className="hint">미션은 나만 알고 있습니다. 다른 마피아도 모릅니다.</p>
+      <p className="hint">미션은 나만 알아요. 다른 마피아도 몰라요.</p>
       {state.mafiaTeam && state.mafiaTeam.length > 0 && (
         <>
           <label>함께하는 마피아</label>
@@ -232,7 +232,7 @@ function MafiaView({ state }: { state: PlayerState }) {
             당신의 정체는 <RoleTag role={role} /> 입니다
           </div>
           <div className="dead-title">당신은 사망하셨습니다.</div>
-          <p className="hint">게임이 끝날 때까지 조용히 지켜봐 주세요.</p>
+          <p className="hint">게임이 끝날 때까지 지켜봐 주세요.</p>
         </section>
         {missionCard}
       </>
@@ -299,13 +299,16 @@ function ImageView({ state, toast }: { state: PlayerState; toast: (msg: string) 
       <>
         <section className="card result-hero team-image">
           <div className="hint">Q{img.round}. {img.question}</div>
-          <div className="result-title">👑 {first.length ? first.map((r) => r.name).join(', ') : '-'}</div>
+          <div className="result-crown">👑</div>
+          <div className="result-title">
+            {first.length ? first.map((r) => <span key={r.id} className="line">{r.name}</span>) : '-'}
+          </div>
           {first.length > 0 && <div className="result-sub">{first[0].votes}표로 가장 많이 선택됐어요</div>}
         </section>
         <section className="card">
           <h2>TOP 3</h2>
-          <Ranking entries={img.ranking} emptyText="투표한 사람이 없습니다." />
-          <p className="hint center">관리자가 다음 질문을 시작하면 자동으로 넘어갑니다.</p>
+          <Ranking entries={img.ranking} emptyText="투표한 사람이 없어요." />
+          <p className="hint center">다음 질문을 기다리는 중…</p>
         </section>
       </>
     )
@@ -315,7 +318,7 @@ function ImageView({ state, toast }: { state: PlayerState; toast: (msg: string) 
     <section className="card">
       <div className="hint center">질문 {img.round}</div>
       <div className="question">{img.question}</div>
-      <p className="hint center">해당하는 사람을 한 명 골라주세요. 결과 공개 전까지 바꿀 수 있어요.</p>
+      <p className="hint center">한 명을 골라주세요. 공개 전엔 바꿀 수 있어요.</p>
       <div className="pick-grid">
         {state.players.map((p) => (
           <button key={p.id} className={img.myVote === p.id ? 'selected' : ''} onClick={() => vote(p.id)}>

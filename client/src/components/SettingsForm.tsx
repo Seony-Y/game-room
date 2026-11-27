@@ -86,27 +86,28 @@ export default function SettingsForm({ initial, lockGameType, submitLabel, onSub
             </div>
           </div>
           <p className={`hint ${citizens < 0 ? 'warn' : ''}`}>
-            {citizens >= 0 ? `시민 ${citizens}명` : '역할 수가 참가 인원보다 많습니다.'}
+            {citizens >= 0 ? `시민 ${citizens}명` : '역할 수가 참가 인원보다 많아요.'}
           </p>
 
-          <label>마피아 미션 ({v.missions.length}개 · 마피아 1명당 1개 랜덤 배정)</label>
+          <label>마피아 미션 ({v.missions.length}개)</label>
           {v.missions.map((m, i) => (
             <input
               key={i}
               className="mission-input"
-              placeholder={`미션 ${i + 1}  예) 대화 중 "진짜?"를 3번 말하기`}
+              placeholder={i === 0 ? '미션 1  예) 칭찬 2번 하기' : `미션 ${i + 1}`}
               value={m}
               maxLength={200}
               onChange={(e) => set('missions', v.missions.map((x, j) => (j === i ? e.target.value : x)))}
             />
           ))}
+          <p className="hint">마피아 1명당 1개씩 랜덤 배정돼요.</p>
         </>
       ) : (
         <>
           <label htmlFor="question">질문</label>
           <textarea
             id="question"
-            placeholder="예) 무인도에 같이 가고 싶은 사람은?"
+            placeholder="예) 무인도에 데려갈 사람은?"
             maxLength={200}
             value={v.question}
             onChange={(e) => set('question', e.target.value)}
