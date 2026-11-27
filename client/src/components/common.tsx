@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { useConnected } from '../hooks'
+import { useConnected, useRemainingSeconds } from '../hooks'
 import { ROLE_INFO } from '../lib'
-import type { RankEntry, Role } from '../types'
+import type { RankEntry, Role, RoundHistory } from '../types'
 
 export function Layout({ title, badge, children }: { title: string; badge?: string; children: ReactNode }) {
   const connected = useConnected()
@@ -52,4 +52,33 @@ export function Ranking({ entries, emptyText = '아직 투표가 없습니다.' 
 
 export function Toast({ msg }: { msg: string }) {
   return <div className={`toast ${msg ? 'show' : ''}`}>{msg}</div>
+}
+
+export function VoteTimer({ endsAt, durationMs, serverNow, closed }: { endsAt: number; durationMs: number; serverNow: number; closed: boolean }) {
+  const left = useRemainingSeconds(endsAt, serverNow)
+  if (closed || left === 0) return <div className="vote-timer done">⏰ 투표 마감</div>
+  return (
+    <div className={`vote-timer ${left <= 10 ? 'urgent' : ''}`}>
+      <span>⏱ 남은 시간 {Math.floor(left / 60)}:{String(left % 60).padStart(2, '0')}</span>
+      <div className="bar">
+        <span style={{ width: `${Math.min(100, (left * 1000 / durationMs) * 100)}%` }} />
+      </div>
+    </div>
+  )
+}
+
+export function History({ history }: { history: RoundHistory[] }) {
+  if (!history.length) return <p className="hint center">결과를 공개한 질문이 없어요.</p>
+  return (
+    <ol className="history">
+      {history.map((h) => (
+        <li key={h.round}>
+          <span className="history-q">Q{h.round}. {h.question}</span>
+          <span className="history-w">
+            {h.winners.length ? `👑 ${h.winners.join(', ')} · ${h.votes}표` : '투표 없음'}
+          </span>
+        </li>
+      ))}
+    </ol>
+  )
 }

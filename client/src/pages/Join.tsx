@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Layout, Ranking, RoleTag, Toast } from '../components/common'
+import { History, Layout, Ranking, RoleTag, Toast, VoteTimer } from '../components/common'
 import { useToast } from '../hooks'
 import { emit, socket } from '../socket'
 import { getDeviceId, OUTCOME_LINES, PLAYER_KEY, ROLE_INFO, storageGet, storageSet, TEAM_NAME } from '../lib'
@@ -44,7 +44,14 @@ export default function Join() {
       const res = await emit<JoinAck>('player:join', { ...s, deviceId: getDeviceId() })
       if (!res.ok) leaveSession(res.error)
     }
-    const onState = (s: PlayerState) => setState(s)
+    const onState = (s: PlayerState) => {
+      setState(s)
+      // 게임 종료 = 방 삭제. 종료 화면은 유지하고 재접속 대상에서 제외
+      if (s.status === 'ended') {
+        storageSet(PLAYER_KEY, null)
+        sessionRef.current = null
+      }
+    }
     const onKicked = () => leaveSession('관리자가 방에서 내보냈어요.')
     const onClosed = () => leaveSession('방이 닫혔어요.')
     socket.on('connect', rejoin)
@@ -98,6 +105,19 @@ export default function Join() {
       {state.status === 'lobby' && <Waiting state={state} onLeave={leave} />}
       {state.status === 'playing' && state.gameType === 'mafia' && <MafiaView state={state} />}
       {state.status === 'playing' && state.gameType === 'image' && <ImageView state={state} toast={toast} />}
+      {state.status === 'ended' && (
+        <>
+          <section className="card result-hero team-image">
+            <div className="result-crown">🏁</div>
+            <div className="result-title">게임이 종료되었습니다</div>
+            <div className="result-sub">참여해 주셔서 감사합니다</div>
+          </section>
+          <section className="card">
+            <h2>질문별 1위</h2>
+            <History history={state.history ?? []} />
+          </section>
+        </>
+      )}
       <Toast msg={toastMsg} />
     </Layout>
   )
@@ -318,10 +338,18 @@ function ImageView({ state, toast }: { state: PlayerState; toast: (msg: string) 
     <section className="card">
       <div className="hint center">질문 {img.round}</div>
       <div className="question">{img.question}</div>
-      <p className="hint center">한 명을 골라주세요. 공개 전엔 바꿀 수 있어요.</p>
+      <VoteTimer key={img.round} endsAt={img.endsAt} durationMs={img.durationMs} serverNow={state.serverNow} closed={img.closed} />
+      <p className="hint center">
+        {img.closed ? '결과 공개를 기다리는 중…' : '한 명을 골라주세요. 마감 전엔 바꿀 수 있어요.'}
+      </p>
       <div className="pick-grid">
         {state.players.map((p) => (
-          <button key={p.id} className={img.myVote === p.id ? 'selected' : ''} onClick={() => vote(p.id)}>
+          <button
+            key={p.id}
+            className={img.myVote === p.id ? 'selected' : ''}
+            disabled={img.closed}
+            onClick={() => vote(p.id)}
+          >
             {p.name}{p.id === state.me.id ? ' (나)' : ''}
           </button>
         ))}

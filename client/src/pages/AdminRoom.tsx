@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Layout, Ranking, RoleTag, Toast } from '../components/common'
+import { History, Layout, Ranking, RoleTag, Toast, VoteTimer } from '../components/common'
 import SettingsForm from '../components/SettingsForm'
 import { useToast } from '../hooks'
 import type { SettingsValues } from '../settings'
@@ -16,15 +16,24 @@ export default function AdminRoom() {
   const [error, setFatal] = useState('')
   const fatal = saved ? error : '이 브라우저엔 관리 권한이 없어요.'
   const [toastMsg, toast] = useToast()
+  const endedRef = useRef(false)
 
   useEffect(() => {
     if (!saved) return
     // 연결(재연결 포함)될 때마다 관리자 채널 재입장
     const join = async () => {
+      if (endedRef.current) return
       const res = await emit('admin:join', { code, adminToken: saved.adminToken })
       if (!res.ok) setFatal(res.error)
     }
-    const onState = (s: AdminState) => setState(s)
+    const onState = (s: AdminState) => {
+      setState(s)
+      // 게임 종료 = 방 삭제
+      if (s.status === 'ended') {
+        endedRef.current = true
+        storageSet(adminKey(code), null)
+      }
+    }
     const onClosed = () => {
       storageSet(adminKey(code), null)
       setFatal('방이 닫혔어요.')
@@ -81,33 +90,49 @@ export default function AdminRoom() {
           <div style={{ textAlign: 'right' }}>
             <span className="badge">{state.gameType === 'mafia' ? '🕵️ 마피아' : '🖼️ 이미지'}</span>{' '}
             <span className={`badge ${state.status === 'playing' ? 'badge-live' : ''}`}>
-              {state.status === 'lobby' ? '대기 중' : '진행 중'}
+              {state.status === 'lobby' ? '대기 중' : state.status === 'ended' ? '종료' : '진행 중'}
             </span>
           </div>
         </div>
-        <label>사용자 입장 URL</label>
-        <div className="link-line">
-          <input readOnly value={joinUrl} onFocus={(e) => e.target.select()} />
-          <button
-            className="small"
-            onClick={() => navigator.clipboard?.writeText(joinUrl).then(() => toast('복사했어요'), () => toast('복사에 실패했어요'))}
-          >
-            복사
-          </button>
-        </div>
+        {state.status !== 'ended' && (
+          <>
+            <label>사용자 입장 URL</label>
+            <div className="link-line">
+              <input readOnly value={joinUrl} onFocus={(e) => e.target.select()} />
+              <button
+                className="small"
+                onClick={() => navigator.clipboard?.writeText(joinUrl).then(() => toast('복사했어요'), () => toast('복사에 실패했어요'))}
+              >
+                복사
+              </button>
+            </div>
+          </>
+        )}
       </section>
 
       {state.status === 'lobby' && <Lobby state={state} act={act} />}
       {state.status === 'playing' && state.gameType === 'mafia' && <MafiaPlay state={state} act={act} />}
       {state.status === 'playing' && state.gameType === 'image' && <ImagePlay state={state} act={act} />}
+      {state.status === 'ended' && (
+        <section className="card">
+          <h2>🏁 게임 종료 <span className="hint">(방이 종료됐어요)</span></h2>
+          <History history={state.history} />
+        </section>
+      )}
 
       <section className="card">
         <div className="actions" style={{ marginTop: 0 }}>
-          {state.status === 'playing' && (
-            <button onClick={() => act('admin:reset', undefined, '대기실로 돌아갔어요')}>대기실로 돌아가기 (다시 하기)</button>
+          {state.status === 'ended' ? (
+            <button className="primary" onClick={() => navigate('/admin')}>새 방 만들기</button>
+          ) : (
+            <>
+              {state.status === 'playing' && (
+                <button onClick={() => act('admin:reset', undefined, '대기실로 돌아갔어요')}>대기실로 돌아가기 (다시 하기)</button>
+              )}
+              <button className="ghost" onClick={() => navigate('/admin')}>새 방 만들기</button>
+              <ConfirmButton label="방 닫기" confirmLabel="정말 닫을까요?" onConfirm={() => act('admin:close')} />
+            </>
           )}
-          <button className="ghost" onClick={() => navigate('/admin')}>새 방 만들기</button>
-          <ConfirmButton label="방 닫기" confirmLabel="정말 닫을까요?" onConfirm={() => act('admin:close')} />
         </div>
       </section>
       <Toast msg={toastMsg} />
@@ -272,6 +297,7 @@ function ImagePlay({ state, act }: { state: AdminState; act: Act }) {
     <section className="card">
       <h2>이미지 게임 <span className="badge">질문 {img.round}</span></h2>
       <div className="question">{img.question}</div>
+      <VoteTimer key={img.round} endsAt={img.endsAt} durationMs={img.durationMs} serverNow={state.serverNow} closed={img.closed} />
       <p className="progress-text">{img.votedCount} / {state.players.length}명 투표 완료</p>
 
       <p className="hint">실시간 집계 (관리자만 보임)</p>
@@ -303,6 +329,7 @@ function ImagePlay({ state, act }: { state: AdminState; act: Act }) {
       <textarea id="next" placeholder="다음 질문 입력" maxLength={200} value={next} onChange={(e) => setNext(e.target.value)} />
       <div className="actions">
         <button disabled={!next.trim()} onClick={startNext}>다음 질문 시작</button>
+        <ConfirmButton label="🏁 게임 종료" confirmLabel="정말 종료할까요?" onConfirm={() => act('admin:end-game', undefined, '게임을 종료했어요')} />
       </div>
     </section>
   )

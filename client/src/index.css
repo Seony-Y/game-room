@@ -361,3 +361,20 @@ button.success { background: var(--ok); border-color: var(--ok); color: #fff; }
   header.top h1 { font-size: 18px; white-space: nowrap; }
   header.top .badge { font-size: 11px; padding: 2px 8px; }
 }
+
+/* 이미지 게임 타이머 */
+.vote-timer { margin: 12px 0 4px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.vote-timer > span { display: block; margin-bottom: 6px; }
+.vote-timer .bar { height: 6px; }
+.vote-timer .bar > span { transition: width 0.25s linear; }
+.vote-timer.urgent { color: var(--accent); }
+.vote-timer.done { color: var(--muted); padding: 6px 0; }
+.pick-grid button:disabled:not(.selected) { opacity: 0.45; }
+.pick-grid button.selected:disabled { opacity: 1; }
+
+/* 게임 종료 기록 */
+.history { list-style: none; padding: 0; margin: 0; }
+.history li { padding: 10px 0; border-bottom: 1px solid var(--border); }
+.history li:last-child { border-bottom: 0; }
+.history-q { display: block; font-size: 14px; color: var(--muted); }
+.history-w { display: block; font-weight: 700; margin-top: 2px; }

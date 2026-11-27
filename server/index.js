@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 
 const PORT = process.env.PORT || 3001;
 const ROOM_TTL_MS = 12 * 60 * 60 * 1000;
+const VOTE_MS = Number(process.env.VOTE_MS) || 60 * 1000; // 이미지 게임 질문당 투표 시간
 // 콤마로 구분된 허용 Origin 목록 (예: https://game-room.vercel.app,http://localhost:5173). 비우면 전체 허용
 const CLIENT_ORIGIN = (process.env.CLIENT_ORIGIN || '')
   .split(',')
@@ -140,6 +141,7 @@ function topRanking(room) {
 
 function adminState(room) {
   return {
+    serverNow: Date.now(),
     code: room.code,
     gameType: room.gameType,
     capacity: room.capacity,
@@ -163,14 +165,19 @@ function adminState(room) {
       round: room.image.round,
       question: room.image.question,
       votedCount: Object.keys(room.image.votes).length,
+      endsAt: room.image.endsAt,
+      durationMs: VOTE_MS,
+      closed: imageClosed(room),
       revealed: room.image.revealed,
       results: imageResults(room),
     },
+    history: room.history,
   };
 }
 
 function playerState(room, player) {
   const base = {
+    serverNow: Date.now(),
     code: room.code,
     gameType: room.gameType,
     capacity: room.capacity,
@@ -179,6 +186,7 @@ function playerState(room, player) {
     players: playerList(room),
   };
   if (room.status === 'lobby') return base;
+  if (room.status === 'ended') return { ...base, history: room.history };
 
   if (room.gameType === 'mafia') {
     base.role = player.role;
@@ -201,6 +209,9 @@ function playerState(room, player) {
       question: room.image.question,
       myVote: room.image.votes[player.id] ?? null,
       votedCount: Object.keys(room.image.votes).length,
+      endsAt: room.image.endsAt,
+      durationMs: VOTE_MS,
+      closed: imageClosed(room),
       revealed: room.image.revealed,
       ranking: room.image.revealed ? topRanking(room) : null,
     };
@@ -227,13 +238,30 @@ function getAdminRoom(socket, cb) {
   return room;
 }
 
+// 투표 마감 여부 (시간 종료 또는 결과 공개)
+function imageClosed(room) {
+  return !!room.image && (room.image.revealed || Date.now() >= room.image.endsAt);
+}
+
+function clearImageTimer(room) {
+  if (room.image?.timer) clearTimeout(room.image.timer);
+}
+
 function startImageRound(room, question) {
-  room.image = {
+  clearImageTimer(room);
+  const image = {
     round: (room.image?.round ?? 0) + 1,
     question,
     votes: {},
     revealed: false,
+    endsAt: Date.now() + VOTE_MS,
+    timer: null,
   };
+  // 시간이 끝나면 마감 상태를 모두에게 알림 (결과 공개는 관리자가 진행)
+  image.timer = setTimeout(() => {
+    if (rooms.get(room.code) === room && room.image === image) broadcast(room);
+  }, VOTE_MS + 50);
+  room.image = image;
 }
 
 io.on('connection', (socket) => {
@@ -255,6 +283,7 @@ io.on('connection', (socket) => {
       players: new Map(),
       image: null,
       resultShared: false,
+      history: [], // 이미지 게임: 결과 공개된 질문별 1위 기록
       banned: new Set(), // 내보낸 기기 ID (스스로 나간 경우는 제외)
       updatedAt: Date.now(),
     };
@@ -374,16 +403,43 @@ io.on('connection', (socket) => {
   socket.on('admin:reveal', (_, cb) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
-    if (room.gameType !== 'image' || !room.image) return cb?.({ ok: false, error: '진행 중인 질문이 없어요.' });
-    room.image.revealed = true;
+    if (room.gameType !== 'image' || !room.image || room.status !== 'playing') {
+      return cb?.({ ok: false, error: '진행 중인 질문이 없어요.' });
+    }
+    if (!room.image.revealed) {
+      room.image.revealed = true;
+      const winners = topRanking(room).filter((r) => r.rank === 1);
+      room.history.push({
+        round: room.image.round,
+        question: room.image.question,
+        winners: winners.map((r) => r.name),
+        votes: winners[0]?.votes ?? 0,
+      });
+    }
+    clearImageTimer(room);
     cb?.({ ok: true });
     broadcast(room);
+  });
+
+  // 이미지 게임 전체 종료: 마지막으로 종료 화면(질문별 1위)을 보내고 방을 삭제
+  socket.on('admin:end-game', (_, cb) => {
+    const room = getAdminRoom(socket, cb);
+    if (!room) return;
+    if (room.gameType !== 'image' || room.status !== 'playing') {
+      return cb?.({ ok: false, error: '진행 중인 이미지 게임이 없어요.' });
+    }
+    clearImageTimer(room);
+    room.status = 'ended';
+    broadcast(room);
+    rooms.delete(room.code);
+    cb?.({ ok: true });
   });
 
   socket.on('admin:next-question', ({ question } = {}, cb) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
     if (room.gameType !== 'image') return cb?.({ ok: false, error: '이미지 게임이 아니에요.' });
+    if (room.status !== 'playing') return cb?.({ ok: false, error: '진행 중인 게임이 없어요.' });
     const q = cleanText(question);
     if (!q) return cb?.({ ok: false, error: '질문을 입력해주세요.' });
     room.settings.question = q;
@@ -397,7 +453,9 @@ io.on('connection', (socket) => {
     const room = getAdminRoom(socket, cb);
     if (!room) return;
     room.status = 'lobby';
+    clearImageTimer(room);
     room.image = null;
+    room.history = [];
     room.resultShared = false;
     for (const p of room.players.values()) {
       p.role = null;
@@ -434,6 +492,7 @@ io.on('connection', (socket) => {
       if (p.socketId) io.to(p.socketId).emit('player:closed');
     }
     io.to(`admin:${room.code}`).emit('admin:closed');
+    clearImageTimer(room);
     rooms.delete(room.code);
     cb?.({ ok: true });
   });
@@ -491,6 +550,7 @@ io.on('connection', (socket) => {
       return cb?.({ ok: false, error: '지금은 투표할 수 없어요.' });
     }
     if (room.image.revealed) return cb?.({ ok: false, error: '이미 결과가 공개됐어요.' });
+    if (imageClosed(room)) return cb?.({ ok: false, error: '투표 시간이 끝났어요.' });
     if (!room.players.has(targetId)) return cb?.({ ok: false, error: '잘못된 선택이에요.' });
     room.image.votes[me.id] = targetId;
     cb?.({ ok: true });
@@ -518,7 +578,10 @@ io.on('connection', (socket) => {
 setInterval(() => {
   const now = Date.now();
   for (const [code, room] of rooms) {
-    if (now - room.updatedAt > ROOM_TTL_MS) rooms.delete(code);
+    if (now - room.updatedAt > ROOM_TTL_MS) {
+      clearImageTimer(room);
+      rooms.delete(code);
+    }
   }
 }, 10 * 60 * 1000).unref();
 

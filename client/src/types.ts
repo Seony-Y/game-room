@@ -1,6 +1,13 @@
 export type GameType = 'mafia' | 'image'
 export type Role = 'mafia' | 'doctor' | 'police' | 'citizen'
-export type Status = 'lobby' | 'playing'
+export type Status = 'lobby' | 'playing' | 'ended'
+
+export interface RoundHistory {
+  round: number
+  question: string
+  winners: string[]
+  votes: number
+}
 
 export interface MafiaSettings {
   mafia: number
@@ -51,6 +58,7 @@ export interface AdminPlayer {
 }
 
 export interface AdminState {
+  serverNow: number
   code: string
   gameType: GameType
   capacity: number
@@ -62,12 +70,17 @@ export interface AdminState {
     round: number
     question: string
     votedCount: number
+    endsAt: number
+    durationMs: number
+    closed: boolean
     revealed: boolean
     results: RankEntry[]
   } | null
+  history: RoundHistory[]
 }
 
 export interface PlayerState {
+  serverNow: number
   code: string
   gameType: GameType
   capacity: number
@@ -89,9 +102,13 @@ export interface PlayerState {
     question: string
     myVote: string | null
     votedCount: number
+    endsAt: number
+    durationMs: number
+    closed: boolean
     revealed: boolean
     ranking: RankEntry[] | null
   }
+  history?: RoundHistory[]
 }
 
 export type Ack = { ok: true; [key: string]: unknown } | { ok: false; error: string }
